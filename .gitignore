@@ -17,3 +17,4 @@ uploads/
 .DS_Store
 Thumbs.db
 cloud-init.yml
+remove_ebird_duplicates.py
