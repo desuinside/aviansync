@@ -16,3 +16,4 @@ uploads/
 # OS
 .DS_Store
 Thumbs.db
+cloud-init.yml

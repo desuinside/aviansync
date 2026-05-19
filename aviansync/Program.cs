@@ -110,6 +110,9 @@ app.MapGet("/", () =>
 			<div id=""bar"" class=""progress-bar"" style=""width:0%;transition:width 0.3s""></div>
 		</div>
 		<p class=""text-muted small mb-3""><span id=""message"">Starting...</span></p>
+		<div id=""importHint"" class=""alert alert-info py-2 small mb-3"" style=""display:none"">
+			Download the CSV, then upload it at <a href=""https://ebird.org/import/upload.form"" target=""_blank"" rel=""noopener"">ebird.org/import</a> &mdash; choose <strong>eBird Record Format (Extended)</strong>.
+		</div>
 
 		<table class=""table table-sm table-hover table-bordered"" id=""table"">
 			<thead class=""table-light"">
@@ -134,6 +137,7 @@ app.MapGet("/", () =>
 		sortCol = -1; sortDir = 1;
 		document.getElementById('jobTitle').innerText = 'Processing...';
 		document.getElementById('downloadLink').style.display = 'none';
+		document.getElementById('importHint').style.display = 'none';
 		const form = new FormData(document.getElementById('uploadForm'));
 		const res = await fetch('/start', { method: 'POST', body: form });
 		const data = await res.json();
@@ -165,6 +169,7 @@ app.MapGet("/", () =>
 				}
 				if (pct >= 100) {
 					document.getElementById('jobTitle').innerText = 'Done';
+					document.getElementById('importHint').style.display = 'block';
 				} else {
 					setTimeout(poll, 1000);
 				}

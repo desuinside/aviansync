@@ -42,3 +42,11 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Deploy to server
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SSH_DEPLOY_HOST }}
+          username: ${{ secrets.SSH_DEPLOY_USERNAME }}
+          key: ${{ secrets.SSH_DEPLOY_KEY }}
+          script: systemctl restart aviansync
