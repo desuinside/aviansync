@@ -1,0 +1,18 @@
+# Build output
+aviansync/bin/
+aviansync/obj/
+
+# Uploads / generated files
+uploads/
+uploads/
+*.csv
+*.json
+
+# IDE
+.vscode/
+*.user
+.claude/
+
+# OS
+.DS_Store
+Thumbs.db
