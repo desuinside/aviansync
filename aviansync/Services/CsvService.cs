@@ -11,7 +11,7 @@ public static class CsvService
     {
         Directory.CreateDirectory(outDir);
         var file = Path.Combine(outDir, $"all_bird_entries_{userId}.csv");
-        using var writer = new StreamWriter(file, false, Encoding.UTF8);
+        using var writer = new StreamWriter(file, false, new System.Text.UTF8Encoding(false));
         using var csv = new CsvWriter(writer, CultureInfo.InvariantCulture);
         foreach (var e in entries)
         {

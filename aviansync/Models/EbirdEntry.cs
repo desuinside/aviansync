@@ -17,7 +17,7 @@ public class EbirdEntry
     public string Protocol { get; set; } = "Incidental";
     public int NumberOfObservers { get; set; } = 1;
     public int Duration { get; set; } = 0;
-    public bool AllObservationsReported { get; set; } = false;
+    public string AllObservationsReported { get; set; } = "N";
     public int EffortDistanceMiles { get; set; } = 0;
     public int EffortAreaAcres { get; set; } = 0;
     public string SubmissionComments { get; set; } = "";

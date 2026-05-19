@@ -7,29 +7,28 @@ using CsvHelper.Configuration;
 var builder = WebApplication.CreateBuilder(args);
 // Register InatService as a typed HttpClient so it receives a configured HttpClient
 builder.Services.AddHttpClient<aviansync.Services.InatService>();
+builder.Services.AddHttpClient<aviansync.Services.EbirdTaxonomyService>();
 
 var app = builder.Build();
 
-var jobs = new ConcurrentDictionary<string, string>(); // jobId -> output file path
+var jobs     = new ConcurrentDictionary<string, string>(); // jobId -> output file path
+var progress = new ConcurrentDictionary<string, string>(); // jobId -> serialized progress JSON
 var uploadsDir = Path.Combine(Directory.GetCurrentDirectory(), "uploads");
 Directory.CreateDirectory(uploadsDir);
 
 // Clear any files left over from a previous run
 foreach (var f in Directory.GetFiles(uploadsDir)) try { File.Delete(f); } catch { }
 
-// Helper: write progress to JSON file
+// Helper: write progress in-memory (no file I/O race condition)
 void WriteProgress(string jobId, object payload)
 {
-	var progressPath = Path.Combine(uploadsDir, $"progress_{jobId}.json");
-	File.WriteAllText(progressPath, System.Text.Json.JsonSerializer.Serialize(payload));
+	progress[jobId] = System.Text.Json.JsonSerializer.Serialize(payload);
 }
 
-// Helper: read progress from JSON file
+// Helper: read progress from memory
 object? ReadProgress(string jobId)
 {
-	var progressPath = Path.Combine(uploadsDir, $"progress_{jobId}.json");
-	if (!File.Exists(progressPath)) return null;
-	var json = File.ReadAllText(progressPath);
+	if (!progress.TryGetValue(jobId, out var json)) return null;
 	return System.Text.Json.JsonSerializer.Deserialize<JsonElement>(json);
 }
 
@@ -58,8 +57,9 @@ app.MapGet("/", () =>
 		th[data-dir=asc]::after  { content: ' \25B2'; font-size: 0.7em; opacity: 0.6; }
 		th[data-dir=desc]::after { content: ' \25BC'; font-size: 0.7em; opacity: 0.6; }
 		.table td { vertical-align: middle; }
-		.badge-yes { background: #d4edda; color: #155724; }
-		.badge-no  { background: #f8d7da; color: #721c24; }
+		.badge-yes     { background: #d4edda; color: #155724; }
+		.badge-no      { background: #f8d7da; color: #721c24; }
+		.badge-invalid { background: #e2e3e5; color: #383d41; }
 	</style>
 </head>
 <body>
@@ -82,16 +82,23 @@ app.MapGet("/", () =>
 					</label>
 					<input type=""file"" class=""form-control"" id=""file"" name=""file"" accept="".csv"" required>
 				</div>
+				<div class=""mb-3"">
+					<label for=""ebird_api_key"" class=""form-label fw-semibold"">
+						eBird API key
+						<span class=""fw-normal text-muted small ms-1"">optional &mdash; enables taxonomy validation</span>
+					</label>
+					<input type=""text"" class=""form-control"" id=""ebird_api_key"" name=""ebird_api_key"" placeholder=""Get yours at ebird.org/api/keygen"">
+				</div>
 				<div class=""mb-2"">
 					<div class=""form-check"">
-						<input class=""form-check-input"" type=""checkbox"" id=""display_all"" name=""display_all"" checked>
+						<input class=""form-check-input"" type=""checkbox"" id=""display_all"" name=""display_all"">
 						<label class=""form-check-label"" for=""display_all"">Include species already in eBird</label>
 						<div class=""form-text"">If unchecked, only species missing from your eBird life list are exported.</div>
 					</div>
 				</div>
 				<div class=""mb-4"">
 					<div class=""form-check"">
-						<input class=""form-check-input"" type=""checkbox"" id=""merge_checklists"" name=""merge_checklists"">
+						<input class=""form-check-input"" type=""checkbox"" id=""merge_checklists"" name=""merge_checklists"" checked>
 						<label class=""form-check-label"" for=""merge_checklists"">Merge into one checklist per day</label>
 						<div class=""form-text"">Groups all species observed on the same date into a single eBird checklist.</div>
 					</div>
@@ -158,7 +165,10 @@ app.MapGet("/", () =>
 				(data.rows || []).forEach(r => {
 					const tr = document.createElement('tr');
 					const yesNo = v => `<span class=""badge ${v ? 'badge-yes' : 'badge-no'}"">${v}</span>`;
-					tr.innerHTML = `<td>${r.english}</td><td><em>${r.latin}</em></td><td>${r.date}</td><td>${yesNo(r.inat)}</td><td>${yesNo(r.ebird)}</td>`;
+					const ebirdCell = r.taxonValid === false
+						? `<span class=""badge badge-invalid"" title=""Scientific name not matched in eBird taxonomy — included in CSV with iNaturalist name"">unmatched</span>`
+						: yesNo(r.ebird);
+					tr.innerHTML = `<td>${r.english}</td><td><em>${r.latin}</em></td><td>${r.date}</td><td>${yesNo(r.inat)}</td><td>${ebirdCell}</td>`;
 					tbody.appendChild(tr);
 				});
 				applySort();
@@ -231,7 +241,7 @@ app.MapGet("/favicon.svg", () =>
 	return Results.Content(svg, "image/svg+xml");
 });
 
-app.MapPost("/start", async (HttpRequest request, aviansync.Services.InatService inat) =>
+app.MapPost("/start", async (HttpRequest request, aviansync.Services.InatService inat, aviansync.Services.EbirdTaxonomyService taxonomy) =>
 {
 	var form = await request.ReadFormAsync();
 	var userId = form["user_id"].ToString();
@@ -243,12 +253,12 @@ app.MapPost("/start", async (HttpRequest request, aviansync.Services.InatService
 	WriteProgress(jobId, new { percent = 0, message = "Queued", rows = new List<object>() });
 
 	// Start background job
-	_ = Task.Run(async () => await ProcessJobAsync(jobId, userId, lifePath, form, inat));
+	_ = Task.Run(async () => await ProcessJobAsync(jobId, userId, lifePath, form, inat, taxonomy));
 
 	return Results.Json(new { jobId });
 });
 
-async Task ProcessJobAsync(string jobId, string userId, string lifePath, IFormCollection form, aviansync.Services.InatService inat)
+async Task ProcessJobAsync(string jobId, string userId, string lifePath, IFormCollection form, aviansync.Services.InatService inat, aviansync.Services.EbirdTaxonomyService taxonomy)
 {
 	try
 	{
@@ -263,11 +273,32 @@ async Task ProcessJobAsync(string jobId, string userId, string lifePath, IFormCo
 		var lifeSet = aviansync.Services.EbLifeListService.LoadScientificNames(lifePath);
 		var lifeListCount = lifeSet.Count;
 		try { File.Delete(lifePath); } catch { }
-		
+
 		// HTML checkboxes only POST when checked — absence means unchecked
 		var displayAll       = form.ContainsKey("display_all");
 		var mergeChecklists  = form.ContainsKey("merge_checklists");
-		WriteProgress(jobId, new { percent = 10, message = $"Loaded life list with {lifeListCount} species", rows = new List<object>() });
+		var ebirdApiKey      = form["ebird_api_key"].ToString();
+
+		// Fetch eBird taxonomy for validation (null = no key provided or fetch failed)
+		Dictionary<string, string>? ebirdTaxa = null;
+		string taxonomyStatus;
+		if (string.IsNullOrWhiteSpace(ebirdApiKey))
+		{
+			taxonomyStatus = $"Loaded life list with {lifeListCount} species (no eBird API key — taxonomy validation skipped)";
+		}
+		else
+		{
+			try
+			{
+				ebirdTaxa = await taxonomy.GetTaxonomyAsync(ebirdApiKey);
+				taxonomyStatus = $"Loaded life list ({lifeListCount} species) · eBird taxonomy ({ebirdTaxa!.Count} species)";
+			}
+			catch (Exception ex)
+			{
+				taxonomyStatus = $"Loaded life list with {lifeListCount} species (eBird taxonomy fetch failed: {ex.Message})";
+			}
+		}
+		WriteProgress(jobId, new { percent = 10, message = taxonomyStatus, rows = new List<object>() });
 
 		var entries = new List<aviansync.Models.EbirdEntry>();
 		var rows    = new List<aviansync.Models.RowData>();
@@ -320,41 +351,41 @@ async Task ProcessJobAsync(string jobId, string userId, string lifePath, IFormCo
 					commonName = en.GetString() ?? "";
 			}
 			var genus = "";
-			var species = "";  // Full species name for life list comparison
-			var speciesEpithet = "";  // Just the last word for CSV
+			var speciesEpithet = "";
+			var binomial = "";
 			if (!string.IsNullOrWhiteSpace(taxonName))
 			{
-				species = taxonName;  // Keep full name for comparison
 				var toks = taxonName.Split(' ');
 				if (toks.Length >= 1) genus = toks[0];
-				if (toks.Length >= 2) speciesEpithet = toks[^1];
+				if (toks.Length >= 2) { speciesEpithet = toks[1]; binomial = $"{toks[0]} {toks[1]}"; }
 			}
 
-			// Check if species is already in life list BEFORE adding
-			var presentInEbird = !string.IsNullOrWhiteSpace(species) && lifeSet.Contains(species);
-			
+			// eBird taxonomy validation: match on binomial to handle subspecies/domestic forms from iNat
+			var ebirdComName = ebirdTaxa != null && !string.IsNullOrEmpty(binomial) && ebirdTaxa.TryGetValue(binomial, out var cn) ? cn : null;
+			var taxonValid = ebirdTaxa == null || ebirdComName != null;
+
+			// Life list check uses binomial so subspecies (e.g. "Anas platyrhynchos domesticus") matches "Anas platyrhynchos"
+			var presentInEbird = !string.IsNullOrWhiteSpace(binomial) && lifeSet.Contains(binomial);
+
 			// Add row for display (regardless of filtering)
-			rows.Add(new aviansync.Models.RowData 
-			{ 
-				English = commonName, 
-				Latin = species, 
-				Date = date, 
-				Inat = true, 
-				Ebird = presentInEbird 
-			});
-			
-			// Filter entries based on displayAll checkbox
-			// If displayAll is false, only add entries that are NOT in the life list (missing entries)
-			if (!displayAll && presentInEbird)
+			rows.Add(new aviansync.Models.RowData
 			{
-				continue;  // Skip this entry, it's already in eBird life list
-			}
+				English    = commonName,
+				Latin      = taxonName,
+				Date       = date,
+				Inat       = true,
+				Ebird      = presentInEbird,
+				TaxonValid = taxonValid
+			});
+
+			// Filter entries based on displayAll checkbox
+			if (!displayAll && presentInEbird) continue;
 			
 			var entry = new aviansync.Models.EbirdEntry
 			{
-				CommonName = commonName,
+				CommonName = ebirdComName ?? commonName, // prefer eBird's name so importer can match it
 				Genus = genus,
-				Species = speciesEpithet,  // Use epithet (last word) for CSV
+				Species = speciesEpithet,
 				Number = "X",
 				SpeciesComments = "",
 				Location = place,
@@ -428,8 +459,8 @@ app.MapGet("/download/{filename}", (string filename) =>
 	var jobId = jobs.FirstOrDefault(j => Path.GetFileName(j.Value) == filename).Key;
 	if (jobId != null)
 	{
-		try { File.Delete(Path.Combine(uploadsDir, $"progress_{jobId}.json")); } catch { }
 		jobs.TryRemove(jobId, out _);
+		progress.TryRemove(jobId, out _);
 	}
 	return Results.File(bytes, "text/csv", filename);
 });
