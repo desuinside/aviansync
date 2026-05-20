@@ -4,7 +4,6 @@ aviansync/obj/
 
 # Uploads / generated files
 uploads/
-uploads/
 *.csv
 *.json
 
@@ -17,4 +16,3 @@ uploads/
 .DS_Store
 Thumbs.db
 cloud-init.yml
-remove_ebird_duplicates.py

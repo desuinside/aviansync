@@ -23,9 +23,10 @@ Open [http://localhost:8080](http://localhost:8080).
 
 2. **Fill in the form**
    - Enter your iNaturalist username
-   - Upload `MyEBirdData.csv`
+   - Upload `ebird_world_life_list.csv`
+   - Optionally enter an [eBird API key](https://ebird.org/api/keygen) — enables taxonomy validation
    - Choose options:
-     - **Display all entries** — when unchecked, only species missing from your eBird list are included in the exported CSV
+     - **Include species already in eBird** — when unchecked, only species missing from your eBird list are included in the exported CSV
      - **Merge into one checklist per day** — groups all species observed on the same date into a single eBird checklist instead of one incidental checklist per observation
 
 3. **Download the CSV**

@@ -85,7 +85,7 @@ app.MapGet("/", () =>
 				<div class=""mb-3"">
 					<label for=""ebird_api_key"" class=""form-label fw-semibold"">
 						eBird API key
-						<span class=""fw-normal text-muted small ms-1"">optional &mdash; enables taxonomy validation</span>
+						<span class=""fw-normal text-muted small ms-1"">optional &mdash; enables taxonomy validation (<a href=""https://ebird.org/api/keygen"" target=""_blank"" class=""text-muted"">get key</a>)</span>
 					</label>
 					<input type=""text"" class=""form-control"" id=""ebird_api_key"" name=""ebird_api_key"" placeholder=""Get yours at ebird.org/api/keygen"">
 				</div>
