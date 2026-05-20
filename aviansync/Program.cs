@@ -107,6 +107,24 @@ app.MapGet("/", () =>
 						<label class=""form-check-label"" for=""merge_checklists"">Merge into one checklist per day</label>
 						<div class=""form-text"">Groups all species observed on the same date into a single eBird checklist.</div>
 					</div>
+					<div id=""mergeOptions"" class=""mt-3 ps-3 border-start border-2"">
+						<div class=""mb-3"">
+							<label class=""form-label small fw-semibold mb-1"">Location radius: <span id=""radiusLabel"">1 km</span></label>
+							<input type=""range"" class=""form-range"" id=""merge_radius"" name=""merge_radius"" min=""100"" max=""10000"" step=""100"" value=""1000"">
+							<div class=""d-flex justify-content-between"">
+								<span class=""text-muted"" style=""font-size:.7rem"">100 m</span>
+								<span class=""text-muted"" style=""font-size:.7rem"">10 km</span>
+							</div>
+						</div>
+						<div class=""mb-1"">
+							<label class=""form-label small fw-semibold mb-1"">Time window: <span id=""timeLabel"">3 h</span></label>
+							<input type=""range"" class=""form-range"" id=""merge_time"" name=""merge_time"" min=""1"" max=""24"" step=""1"" value=""3"">
+							<div class=""d-flex justify-content-between"">
+								<span class=""text-muted"" style=""font-size:.7rem"">1 h</span>
+								<span class=""text-muted"" style=""font-size:.7rem"">24 h</span>
+							</div>
+						</div>
+					</div>
 				</div>
 				<button type=""submit"" class=""btn btn-primary px-4"">Sync</button>
 			</form>
@@ -143,6 +161,25 @@ app.MapGet("/", () =>
 </div>
 <script>
 	let sortCol = -1, sortDir = 1;
+
+	// Merge options panel
+	const mergeChk  = document.getElementById('merge_checklists');
+	const mergeOpts = document.getElementById('mergeOptions');
+	function syncMergePanel() { mergeOpts.style.display = mergeChk.checked ? '' : 'none'; }
+	mergeChk.addEventListener('change', syncMergePanel);
+	syncMergePanel();
+
+	const radiusSlider = document.getElementById('merge_radius');
+	const radiusLabel  = document.getElementById('radiusLabel');
+	function updateRadius() {
+		const v = parseInt(radiusSlider.value);
+		radiusLabel.textContent = v < 1000 ? v + ' m' : (v / 1000 % 1 === 0 ? v/1000 : (v/1000).toFixed(1)) + ' km';
+	}
+	radiusSlider.addEventListener('input', updateRadius);
+
+	const timeSlider = document.getElementById('merge_time');
+	const timeLabel  = document.getElementById('timeLabel');
+	timeSlider.addEventListener('input', () => { timeLabel.textContent = timeSlider.value + ' h'; });
 
 	document.getElementById('uploadForm').addEventListener('submit', async (e) => {
 		e.preventDefault();
@@ -282,6 +319,8 @@ async Task ProcessJobAsync(string jobId, string userId, string lifePath, IFormCo
 		// HTML checkboxes only POST when checked — absence means unchecked
 		var displayAll       = form.ContainsKey("display_all");
 		var mergeChecklists  = form.ContainsKey("merge_checklists");
+		var mergeRadiusM     = int.TryParse(form["merge_radius"], out var _rm) ? _rm : 1000;
+		var mergeTimeHours   = int.TryParse(form["merge_time"],   out var _th) ? _th : 3;
 		var ebirdApiKey      = form["ebird_api_key"].ToString();
 
 		// Fetch eBird taxonomy for validation (null = no key provided or fetch failed)
@@ -410,30 +449,65 @@ async Task ProcessJobAsync(string jobId, string userId, string lifePath, IFormCo
 			WriteProgress(jobId, new { percent, message = $"Processing {i + 1}/{total}", rows });
 		}
 
-		// Merge: one checklist per day — deduplicate species, share first observation's location/time
+		// Merge: cluster nearby same-day observations into one checklist
 		if (mergeChecklists)
 		{
-			entries = entries
-				.GroupBy(e => e.Date)
-				.SelectMany(g =>
+			static bool WithinTime(string t1, string t2, int maxH)
+			{
+				if (!TimeSpan.TryParse(t1, out var ts1) || !TimeSpan.TryParse(t2, out var ts2)) return true;
+				return Math.Abs((ts1 - ts2).TotalHours) <= maxH;
+			}
+			static bool WithinDist(string la1, string lo1, string la2, string lo2, int maxM)
+			{
+				var ci = System.Globalization.CultureInfo.InvariantCulture;
+				if (!double.TryParse(la1, System.Globalization.NumberStyles.Float, ci, out var lat1)
+				 || !double.TryParse(lo1, System.Globalization.NumberStyles.Float, ci, out var lon1)
+				 || !double.TryParse(la2, System.Globalization.NumberStyles.Float, ci, out var lat2)
+				 || !double.TryParse(lo2, System.Globalization.NumberStyles.Float, ci, out var lon2)) return true;
+				const double R = 6_371_000;
+				var dLat = (lat2 - lat1) * Math.PI / 180;
+				var dLon = (lon2 - lon1) * Math.PI / 180;
+				var a = Math.Sin(dLat/2)*Math.Sin(dLat/2)
+				      + Math.Cos(lat1*Math.PI/180)*Math.Cos(lat2*Math.PI/180)
+				      * Math.Sin(dLon/2)*Math.Sin(dLon/2);
+				return R * 2 * Math.Atan2(Math.Sqrt(a), Math.Sqrt(1-a)) <= maxM;
+			}
+
+			var merged = new List<aviansync.Models.EbirdEntry>();
+			foreach (var day in entries.GroupBy(e => e.Date))
+			{
+				var clusters = new List<List<aviansync.Models.EbirdEntry>>();
+				foreach (var obs in day.OrderBy(e => e.StartTime))
 				{
-					var anchor = g.First();
-					return g
-						.GroupBy(e => (e.Genus, e.Species))
-						.Select(sg =>
-						{
-							var e = sg.First();
-							e.Location   = anchor.Location;
-							e.Latitude   = anchor.Latitude;
-							e.Longitude  = anchor.Longitude;
-							e.StartTime  = anchor.StartTime;
-							e.StateProvince = anchor.StateProvince;
-							e.CountryCode   = anchor.CountryCode;
-							e.SubmissionComments = string.Join(", ", sg.Select(x => x.SubmissionComments).Where(s => !string.IsNullOrEmpty(s)));
-							return e;
-						});
-				})
-				.ToList();
+					bool placed = false;
+					foreach (var cluster in clusters)
+					{
+						var anchor = cluster[0];
+						if (WithinTime(obs.StartTime, anchor.StartTime, mergeTimeHours)
+						 && WithinDist(obs.Latitude, obs.Longitude, anchor.Latitude, anchor.Longitude, mergeRadiusM))
+						{ cluster.Add(obs); placed = true; break; }
+					}
+					if (!placed) clusters.Add(new List<aviansync.Models.EbirdEntry> { obs });
+				}
+
+				foreach (var cluster in clusters)
+				{
+					var anchor = cluster[0];
+					foreach (var sg in cluster.GroupBy(e => (e.Genus, e.Species)))
+					{
+						var e = sg.First();
+						e.Location       = anchor.Location;
+						e.Latitude       = anchor.Latitude;
+						e.Longitude      = anchor.Longitude;
+						e.StartTime      = anchor.StartTime;
+						e.StateProvince  = anchor.StateProvince;
+						e.CountryCode    = anchor.CountryCode;
+						e.SubmissionComments = string.Join(", ", sg.Select(x => x.SubmissionComments).Where(s => !string.IsNullOrEmpty(s)));
+						merged.Add(e);
+					}
+				}
+			}
+			entries = merged;
 		}
 
 		// Write CSV
