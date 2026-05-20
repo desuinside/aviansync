@@ -78,7 +78,7 @@ app.MapGet("/", () =>
 				<div class=""mb-3"">
 					<label for=""file"" class=""form-label fw-semibold"">
 						eBird data export
-						<a href=""https://ebird.org/lifelist?r=world&time=life&fmt=csv"" target=""_blank"" class=""fw-normal small ms-1"">download MyEBirdData.csv</a>
+						<a href=""https://ebird.org/lifelist?r=world&time=life&fmt=csv"" target=""_blank"" class=""fw-normal small ms-1"">download ebird_world_life_list.csv</a>
 					</label>
 					<input type=""file"" class=""form-control"" id=""file"" name=""file"" accept="".csv"" required>
 				</div>

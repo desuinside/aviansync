@@ -1,5 +1,7 @@
 # aviansync
 
+**Live at [aviansync.xyz](https://aviansync.xyz)**
+
 Migrate your [iNaturalist](https://www.inaturalist.org) bird observations to [eBird](https://ebird.org).
 
 Fetches all research-grade bird observations for an iNaturalist user, compares them against your existing eBird life list, and produces a CSV in the [eBird record format](https://support.ebird.org/en/support/solutions/articles/48000907878) ready to upload.
@@ -16,8 +18,8 @@ Open [http://localhost:8080](http://localhost:8080).
 
 ## Usage
 
-1. **Get your eBird data export**
-   Sign in at [ebird.org/downloadMyData](https://ebird.org/downloadMyData) and download `MyEBirdData.csv`.
+1. **Get your eBird life list export**
+   Sign in to eBird, then download your life list CSV at [ebird.org/lifelist?r=world&time=life&fmt=csv](https://ebird.org/lifelist?r=world&time=life&fmt=csv) (`ebird_world_life_list.csv`).
 
 2. **Fill in the form**
    - Enter your iNaturalist username
