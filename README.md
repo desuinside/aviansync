@@ -42,22 +42,3 @@ Uploaded files are deleted from the server as soon as they are no longer needed:
 ## Credits
 
 Inspired by [inat2ebird](https://github.com/lubianat/inat2ebird) by [Tiago Lubiana](https://github.com/lubianat).
-
-## Project structure
-
-```
-aviansync/
-├── aviansync/               # ASP.NET minimal API
-│   ├── Models/
-│   │   ├── EbirdEntry.cs        # eBird record format model
-│   │   └── RowData.cs           # UI table row model
-│   ├── Services/
-│   │   ├── InatService.cs       # iNaturalist API pagination
-│   │   ├── EbLifeListService.cs # eBird life list CSV parser
-│   │   └── CsvService.cs        # eBird CSV writer
-│   ├── Program.cs               # Web app, routes, processing logic
-│   ├── aviansync.csproj
-│   └── Dockerfile
-├── docker-compose.yml
-└── README.md
-```
